@@ -18,11 +18,11 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET' && isset($_GET['taxons'])) {
     header('Cache-Control: private, max-age=3600');
-    out(['ok' => true, 'taxons' => array_map(fn($x) => [$x['n'], $x['l']], taxons())]);
+    out(['ok' => true, 'taxons' => array_map(fn($x) => [$x['n'], $x['l'], $x['g']], taxons())]);
 }
 
 if ($method === 'GET') {
-    $biomes = $db->query('SELECT id, name, emoji, description FROM biomes ORDER BY position, id')->fetchAll();
+    $biomes = $db->query('SELECT id, name, emoji, description, habitat FROM biomes ORDER BY position, id')->fetchAll();
     $st = $db->prepare(
         'SELECT o.biome_id, o.name_key, MIN(o.name) AS name, COUNT(*) AS cnt,
                 MAX(o.student_id = ?) AS mine
@@ -53,13 +53,19 @@ if (!hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) {
 
 $action = (string)($_POST['action'] ?? '');
 $biomeId = (int)($_POST['biome_id'] ?? 0);
-$chk = $db->prepare('SELECT 1 FROM biomes WHERE id = ?');
+$chk = $db->prepare('SELECT habitat FROM biomes WHERE id = ?');
 $chk->execute([$biomeId]);
-if (!$chk->fetchColumn()) out(['ok' => false, 'message' => 'Biome inconnu.'], 404);
+$row = $chk->fetch();
+$biomeHabitat = $row['habitat'] ?? null;
+if (!$row) out(['ok' => false, 'message' => 'Biome inconnu.'], 404);
 
 if ($action === 'add') {
     $name = clean_name((string)($_POST['name'] ?? ''));
     $name = canonical_name($name);   // « Hedera helix » → « Lierre » : les synonymes comptent pour une seule espèce
+    $hab = taxon_habitat($name);
+    if ($biomeHabitat && $hab && $hab !== $biomeHabitat) {   // espèce du livret valide seulement dans un autre milieu
+        out(['ok' => false, 'message' => '✖ ' . $name . ' n’est pas attendu dans ce biome (milieu : ' . (HABITATS[$hab] ?? $hab) . '). Vérifie ton biome ou ton identification.']);
+    }
     $len = mb_strlen($name, 'UTF-8');
     if ($len < 2 || $len > 80 || !preg_match('/\p{L}/u', $name)) {
         out(['ok' => false, 'message' => 'Écris un nom entre 2 et 80 caractères.']);

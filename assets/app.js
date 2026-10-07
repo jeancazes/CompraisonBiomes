@@ -80,7 +80,7 @@
         seen[name] = 1; n++;
         var o = el('option', { value: name }); if (label) o.label = label; dl.appendChild(o);
       }
-      taxons.forEach(function (t) { if (fold(t[0]).indexOf(q) !== -1 || fold(t[1]).indexOf(q) !== -1) add(t[0], t[1]); });
+      taxons.forEach(function (t) { if (b.habitat && t[2] !== b.habitat) return; if (fold(t[0]).indexOf(q) !== -1 || fold(t[1]).indexOf(q) !== -1) add(t[0], t[1]); });
       b.species.forEach(function (s) { if (fold(s.name).indexOf(q) !== -1) add(s.name, ''); });
     }
     input.addEventListener('input', suggest);

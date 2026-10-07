@@ -39,6 +39,12 @@ function pdo(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        // Migration douce : milieu du livret associé à chaque biome (colonne ajoutée automatiquement)
+        try {
+            if (!$p->query("SHOW COLUMNS FROM biomes LIKE 'habitat'")->fetch()) {
+                $p->exec("ALTER TABLE biomes ADD COLUMN habitat VARCHAR(20) NULL");
+            }
+        } catch (PDOException $e) { /* tables pas encore créées : install.php s'en charge */ }
     }
     return $p;
 }
@@ -172,6 +178,53 @@ function parse_student_list(string $text): array
         }
     }
     return $out;
+}
+
+/** Minuscules sans accents, ponctuation → espace (pour comparer « Chêne vert » et « chene-vert »). */
+function fold(string $s): string
+{
+    $s = mb_strtolower($s, 'UTF-8');
+    $s = strtr($s, ['œ' => 'oe', 'æ' => 'ae', '’' => "'", 'ç' => 'c', 'ñ' => 'n']);
+    $s = strtr($s, array_combine(
+        mb_str_split('àâäáãåéèêëíìîïóòôöõúùûüýÿ'),
+        mb_str_split('aaaaaaeeeeiiiiooooouuuuyy')
+    ));
+    return trim(preg_replace('/[^a-z0-9]+/', ' ', $s) ?? '');
+}
+
+/** Référentiel d'espèces (livret « Qui vit ici ? ») : data/taxons.json = [{n: nom français, l: nom latin, g: milieu}]. */
+function taxons(): array
+{
+    static $t = null;
+    if ($t === null) {
+        $raw = @file_get_contents(__DIR__ . '/data/taxons.json');
+        $t = $raw ? (json_decode($raw, true) ?: []) : [];
+    }
+    return $t;
+}
+
+/** Si le texte saisi est exactement un nom français ou latin du référentiel, renvoie le nom français officiel (fusion des synonymes). */
+function canonical_name(string $name): string
+{
+    static $idx = null;
+    if ($idx === null) {
+        $idx = [];
+        foreach (taxons() as $x) { $idx[fold($x['n'])] = $x['n']; $idx[fold($x['l'])] = $x['n']; }
+    }
+    return $idx[fold($name)] ?? $name;
+}
+
+const HABITATS = ['foret' => 'Forêt de l’Ancyse', 'ripisylve' => 'Ripisylve', 'riviere' => 'Rivière (la Cèze)'];
+
+/** Milieu du livret où l'espèce (nom français ou latin) est valide, ou null si elle n'est pas dans le référentiel. */
+function taxon_habitat(string $name): ?string
+{
+    static $idx = null;
+    if ($idx === null) {
+        $idx = [];
+        foreach (taxons() as $x) { $idx[fold($x['n'])] = $x['g']; $idx[fold($x['l'])] = $x['g']; }
+    }
+    return $idx[fold($name)] ?? null;
 }
 
 function name_key(string $s): string { return mb_strtolower(clean_name($s), 'UTF-8'); }

@@ -54,22 +54,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $name = mb_substr(clean_name((string)($_POST['name'] ?? '')), 0, 80);
             if ($name === '') back('Nom de biome vide.', 'biomes');
             $pos = (int)$db->query('SELECT COALESCE(MAX(position),0)+1 FROM biomes')->fetchColumn();
-            $db->prepare('INSERT INTO biomes (name, emoji, description, position) VALUES (?,?,?,?)')->execute([
+            $db->prepare('INSERT INTO biomes (name, emoji, description, position, habitat) VALUES (?,?,?,?,?)')->execute([
                 $name,
                 mb_substr(clean_name((string)($_POST['emoji'] ?? '')), 0, 8),
                 mb_substr(clean_name((string)($_POST['description'] ?? '')), 0, 250),
                 $pos,
+                isset(HABITATS[$_POST['habitat'] ?? '']) ? $_POST['habitat'] : null,
             ]);
             back('Biome ajouté.', 'biomes');
 
         case 'biome_update':
             $name = mb_substr(clean_name((string)($_POST['name'] ?? '')), 0, 80);
             if ($name === '') back('Nom de biome vide.', 'biomes');
-            $db->prepare('UPDATE biomes SET name=?, emoji=?, description=?, position=? WHERE id=?')->execute([
+            $db->prepare('UPDATE biomes SET name=?, emoji=?, description=?, position=?, habitat=? WHERE id=?')->execute([
                 $name,
                 mb_substr(clean_name((string)($_POST['emoji'] ?? '')), 0, 8),
                 mb_substr(clean_name((string)($_POST['description'] ?? '')), 0, 250),
                 (int)($_POST['position'] ?? 0),
+                isset(HABITATS[$_POST['habitat'] ?? '']) ? $_POST['habitat'] : null,
                 $id,
             ]);
             back('Biome mis à jour.', 'biomes');
@@ -174,6 +176,7 @@ layout_head('Administration', 'admin');
       <input class="w-emoji" name="emoji" value="<?= h($b['emoji']) ?>" placeholder="🌳" aria-label="Emoji">
       <input name="name" value="<?= h($b['name']) ?>" required aria-label="Nom">
       <input class="grow" name="description" value="<?= h($b['description']) ?>" placeholder="Description (facultatif)" aria-label="Description">
+      <select name="habitat" aria-label="Milieu du livret"><option value="">Milieu : libre</option><?php foreach (HABITATS as $hk => $hl): ?><option value="<?= h($hk) ?>"<?= ($b['habitat'] ?? '') === $hk ? ' selected' : '' ?>><?= h($hl) ?></option><?php endforeach; ?></select>
       <input class="w-pos" type="number" name="position" value="<?= (int)$b['position'] ?>" aria-label="Ordre">
       <button class="btn small" type="submit">Enregistrer</button>
     </form>
@@ -185,7 +188,8 @@ layout_head('Administration', 'admin');
     <input class="w-emoji" name="emoji" placeholder="🌳" aria-label="Emoji">
     <input name="name" placeholder="Nom du biome" required>
     <input class="grow" name="description" placeholder="Description (facultatif)">
-    <button class="btn small" type="submit">Ajouter</button>
+    <select name="habitat" aria-label="Milieu du livret"><option value="">Milieu : libre</option><?php foreach (HABITATS as $hk => $hl): ?><option value="<?= h($hk) ?>"<?= ('') === $hk ? ' selected' : '' ?>><?= h($hl) ?></option><?php endforeach; ?></select>
+      <button class="btn small" type="submit">Ajouter</button>
   </form>
 </section>
 
