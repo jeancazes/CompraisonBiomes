@@ -6,6 +6,9 @@
   var current = null;      // id du biome affiché
   var flash = '';
   var typing = false;
+  var me = { validated: false, draft: null };
+  var invBar = document.getElementById('inv-bar');
+  var confirming = false;
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -36,6 +39,7 @@
       })
       .then(function (j) {
         data = j.biomes || [];
+        me = j.me || me;
         if (!data.some(function (b) { return b.id === current; })) current = data.length ? data[0].id : null;
         render();
       });
@@ -93,6 +97,7 @@
       if (!v) return;
       post('add', b.id, { name: v }).then(function (j) { flash = j.message || ''; return load(); });
     });
+    if (me.validated) { input.disabled = true; form.querySelector('button').disabled = true; }
     panel.appendChild(form);
     if (flash) panel.appendChild(el('p', { class: 'flash', text: flash }));
 
@@ -125,7 +130,39 @@
     panel.appendChild(list);
   }
 
-  function render() { renderTabs(); renderPanel(); }
+  function renderBar() {
+    invBar.textContent = '';
+    if (me.validated) {
+      var re = el('button', { type: 'button', class: 'btn small ghost', text: 'Rouvrir mon inventaire' });
+      re.addEventListener('click', function () { post('reopen', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
+      invBar.appendChild(el('span', { text: '✅ Inventaire validé. ' }));
+      invBar.appendChild(el('a', { class: 'btn small', href: 'classe.php', text: 'Voir le bilan de la classe' }));
+      invBar.appendChild(re);
+      return;
+    }
+    var total = data.reduce(function (n, b) { return n + b.species.filter(function (s) { return s.mine; }).length; }, 0);
+    var draft = el('button', { type: 'button', class: 'btn small ghost', text: '💾 Enregistrer le brouillon' });
+    draft.addEventListener('click', function () { post('draft', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
+    var val = el('button', { type: 'button', class: 'btn small', text: confirming ? 'Confirmer : je valide, je ne pourrai plus modifier sans rouvrir' : '✅ Valider l’inventaire' });
+    val.addEventListener('click', function () {
+      if (!confirming) { confirming = true; renderBar(); return; }
+      post('validate', 0, {}).then(function (j) {
+        confirming = false;
+        if (j.redirect) { location.href = j.redirect; return; }
+        flash = j.message || ''; return load();
+      });
+    });
+    invBar.appendChild(el('span', { class: 'muted', text: total + ' observation' + (total > 1 ? 's' : '') + ' · ' + (me.draft ? 'brouillon enregistré à ' + me.draft : 'brouillon non enregistré') + ' (les ajouts sont gardés automatiquement) ' }));
+    invBar.appendChild(draft);
+    invBar.appendChild(val);
+    if (confirming) {
+      var cancel = el('button', { type: 'button', class: 'link', text: 'Annuler' });
+      cancel.addEventListener('click', function () { confirming = false; renderBar(); });
+      invBar.appendChild(cancel);
+    }
+  }
+
+  function render() { renderBar(); renderTabs(); renderPanel(); }
 
   load();
   // Rafraîchit toutes les 20 s (sauf pendant la saisie) pour voir les ajouts des camarades

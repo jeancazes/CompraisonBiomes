@@ -43,7 +43,13 @@ if ($method === 'GET') {
         $b['id'] = (int)$b['id'];
         $b['species'] = $byBiome[$b['id']] ?? [];
     }
-    out(['ok' => true, 'biomes' => $biomes]);
+    $me = $db->prepare('SELECT validated_at, draft_saved_at FROM students WHERE id = ?');
+    $me->execute([$stu['id']]);
+    $m = $me->fetch() ?: [];
+    out(['ok' => true, 'biomes' => $biomes, 'me' => [
+        'validated' => !empty($m['validated_at']),
+        'draft' => !empty($m['draft_saved_at']) ? substr((string)$m['draft_saved_at'], 11, 5) : null,
+    ]]);
 }
 
 if ($method !== 'POST') out(['ok' => false, 'message' => 'Méthode non autorisée.'], 405);
@@ -52,12 +58,35 @@ if (!hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) {
 }
 
 $action = (string)($_POST['action'] ?? '');
+
+// --- Brouillon / validation de l'inventaire (les ajouts sont déjà enregistrés au fil de l'eau : c'est le brouillon) ---
+if ($action === 'draft') {
+    $db->prepare('UPDATE students SET draft_saved_at = NOW() WHERE id = ? AND validated_at IS NULL')->execute([$stu['id']]);
+    out(['ok' => true, 'message' => '💾 Brouillon enregistré à ' . date('H:i') . '.', 'draft' => date('H:i')]);
+}
+if ($action === 'validate') {
+    $c = $db->prepare('SELECT COUNT(*) FROM observations WHERE student_id = ?');
+    $c->execute([$stu['id']]);
+    if ((int)$c->fetchColumn() === 0) out(['ok' => false, 'message' => 'Ajoute au moins un être vivant avant de valider.']);
+    $db->prepare('UPDATE students SET validated_at = NOW(), draft_saved_at = NOW() WHERE id = ?')->execute([$stu['id']]);
+    out(['ok' => true, 'message' => '✅ Inventaire validé.', 'redirect' => 'classe.php']);
+}
+if ($action === 'reopen') {
+    $db->prepare('UPDATE students SET validated_at = NULL WHERE id = ?')->execute([$stu['id']]);
+    out(['ok' => true, 'message' => 'Inventaire rouvert : tu peux le modifier puis le valider de nouveau.']);
+}
 $biomeId = (int)($_POST['biome_id'] ?? 0);
 $chk = $db->prepare('SELECT habitat FROM biomes WHERE id = ?');
 $chk->execute([$biomeId]);
 $row = $chk->fetch();
 $biomeHabitat = $row['habitat'] ?? null;
 if (!$row) out(['ok' => false, 'message' => 'Biome inconnu.'], 404);
+
+$lock = $db->prepare('SELECT validated_at FROM students WHERE id = ?');
+$lock->execute([$stu['id']]);
+if (($action === 'add' || $action === 'remove') && $lock->fetchColumn()) {
+    out(['ok' => false, 'message' => 'Inventaire validé : clique sur « Rouvrir mon inventaire » pour le modifier.']);
+}
 
 if ($action === 'add') {
     $name = clean_name((string)($_POST['name'] ?? ''));

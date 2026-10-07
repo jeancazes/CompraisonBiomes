@@ -123,6 +123,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare('UPDATE students SET device_hash=NULL, bound_at=NULL WHERE class_id=?')->execute([$id]);
             back('Tous les noms de la classe sont débloqués.', 'class-' . $id);
 
+        case 'class_publish':
+            $db->prepare('UPDATE classes SET final_open = 1 - final_open WHERE id=?')->execute([$id]);
+            back('Bilan final : visibilité modifiée pour cette classe.', 'class-' . $id);
+
+        case 'student_reopen':
+            $cid = (int)($_POST['class_id'] ?? 0);
+            $db->prepare('UPDATE students SET validated_at=NULL WHERE id=?')->execute([$id]);
+            back('Inventaire rouvert pour cet élève.', 'class-' . $cid);
+
+        case 'review':
+            $key = (string)($_POST['key'] ?? '');
+            $status = (string)($_POST['status'] ?? '');
+            $nm = mb_substr(clean_name((string)($_POST['name'] ?? '')), 0, 120);
+            if ($status === 'reset') {
+                $db->prepare('DELETE FROM taxa_review WHERE name_key=?')->execute([$key]);
+                back('Décision annulée.', 'revue');
+            }
+            if (!in_array($status, ['ok', 'no'], true) || $key === '') back('Action inconnue.', 'revue');
+            $merge = $status === 'ok' ? mb_substr(clean_name((string)($_POST['merge'] ?? '')), 0, 120) : '';
+            $db->prepare('INSERT INTO taxa_review (name_key, name, status, merge_into) VALUES (?,?,?,?)
+                          ON DUPLICATE KEY UPDATE status=VALUES(status), merge_into=VALUES(merge_into)')
+               ->execute([$key, $nm, $status, $merge !== '' ? $merge : null]);
+            back($status === 'ok' ? 'Nom validé.' : 'Nom rejeté (exclu des scores corrigés).', 'revue');
+
         case 'password':
             $pw = (string)($_POST['pw'] ?? '');
             if (!password_verify((string)($_POST['old'] ?? ''), $hash)) back('Ancien mot de passe incorrect.', 'securite');
@@ -142,6 +166,13 @@ foreach ($db->query('SELECT s.*, (SELECT COUNT(*) FROM observations o WHERE o.st
                      FROM students s ORDER BY s.name')->fetchAll() as $s) {
     $stuByClass[(int)$s['class_id']][] = $s;
 }
+$reviewRows = [];
+$revMap = [];
+foreach ($db->query('SELECT * FROM taxa_review')->fetchAll() as $r) $revMap[$r['name_key']] = $r;
+foreach ($db->query('SELECT name_key, MIN(name) AS name, COUNT(*) AS cnt, COUNT(DISTINCT biome_id) AS nb FROM observations GROUP BY name_key ORDER BY name')->fetchAll() as $r) {
+    if (taxon_habitat($r['name']) === null) $reviewRows[] = $r + ['rev' => $revMap[$r['name_key']] ?? null];
+}
+$nPending = count(array_filter($reviewRows, fn($r) => !$r['rev']));
 $flash = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']);
 $base = base_url();
 
@@ -159,7 +190,7 @@ layout_head('Administration', 'admin');
 <header class="top">
   <div><strong>Administration</strong></div>
   <nav class="who">
-    <a href="#biomes">Biomes</a> · <a href="#classes">Classes</a> · <a href="#securite">Sécurité</a> ·
+    <a href="#biomes">Biomes</a> · <a href="#classes">Classes</a> · <a href="#revue">Noms hors livret<?= $nPending ? " (" . $nPending . ")" : "" ?></a> · <a href="#securite">Sécurité</a> ·
     <a class="btn small" href="bilan.php">Bilan</a>
     <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="action" value="logout"><button class="link" type="submit">Déconnexion</button></form>
   </nav>
@@ -205,20 +236,22 @@ layout_head('Administration', 'admin');
       $cid = (int)$c['id']; $list = $stuByClass[$cid] ?? [];
       $url = $base . '/index.php?classe=' . rawurlencode($c['slug']); ?>
     <details class="class" id="class-<?= $cid ?>" <?= (($_GET['open'] ?? '') == $cid) ? 'open' : '' ?>>
-      <summary><strong><?= h($c['name']) ?></strong> <span class="muted">· <?= count($list) ?> élève(s)</span></summary>
+      <summary><strong><?= h($c['name']) ?></strong> <span class="muted">· <?= count($list) ?> élève(s) · <?= count(array_filter($list, fn($x) => $x['validated_at'])) ?> inventaire(s) validé(s)<?= $c['final_open'] ? ' · bilan final publié' : '' ?></span></summary>
       <p>🔗 Adresse à donner à la classe :
         <input class="url" readonly value="<?= h($url) ?>" onclick="this.select()">
       </p>
       <table>
-        <thead><tr><th>Nom</th><th>Obs.</th><th>Appareil lié</th><th>IP vues</th><th></th></tr></thead>
+        <thead><tr><th>Nom</th><th>Obs.</th><th>Inventaire</th><th>Appareil lié</th><th>IP vues</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($list as $s): ?>
           <tr>
             <td><?= h($s['name']) ?></td>
             <td><?= (int)$s['nobs'] ?></td>
+            <td><?= $s['validated_at'] ? '✅ ' . h(substr((string)$s['validated_at'], 5, 11)) : ($s['draft_saved_at'] ? '📝 brouillon' : '—') ?></td>
             <td><?= $s['device_hash'] ? '🔒 ' . h(substr((string)$s['bound_at'], 0, 16)) : '—' ?></td>
             <td><?= (int)$s['nips'] ?><?= (int)$s['nips'] >= 4 ? ' ⚠' : '' ?></td>
             <td class="acts">
+              <?php if ($s['validated_at']) echo confirm_form('student_reopen', (int)$s['id'], 'Rouvrir', "Rouvrir l'inventaire de cet élève ?", 'link', ['class_id' => $cid]); ?>
               <?php if ($s['device_hash']) echo confirm_form('student_reset_ip', (int)$s['id'], 'Débloquer', "Autoriser ce nom à se relier à un nouvel appareil ?", 'link', ['class_id' => $cid]); ?>
               <?= confirm_form('student_delete', (int)$s['id'], 'Supprimer', 'Supprimer cet élève et ses observations ?', 'link danger', ['class_id' => $cid]) ?>
             </td>
@@ -233,12 +266,41 @@ layout_head('Administration', 'admin');
         <button class="btn small" type="submit">Ajouter</button>
       </form>
       <div class="right">
+        <?= confirm_form('class_publish', $cid, $c['final_open'] ? '🔒 Masquer le bilan final aux élèves' : '📣 Publier le bilan final aux élèves', $c['final_open'] ? 'Masquer le bilan final ?' : 'Publier le bilan final pour cette classe ?', 'link') ?>
         <?= confirm_form('class_reset_ip', $cid, 'Débloquer toute la classe', 'Débloquer tous les noms de la classe ?', 'link') ?>
         <?= confirm_form('class_clear_obs', $cid, 'Effacer les observations', 'Effacer toutes les observations de cette classe ?') ?>
         <?= confirm_form('class_delete', $cid, 'Supprimer la classe', 'Supprimer la classe, ses élèves et leurs observations ?') ?>
       </div>
     </details>
   <?php endforeach; ?>
+</section>
+
+<section class="card" id="revue">
+  <h2>Noms hors livret à vérifier</h2>
+  <p class="muted">Noms saisis par les élèves qui ne figurent pas dans le livret. <strong>Valider</strong> = compté dans les scores corrigés (tu peux les fusionner avec un autre nom). <strong>Rejeter</strong> = exclu des scores corrigés. Sans décision, le nom est exclu du corrigé.</p>
+  <?php if (!$reviewRows): ?><p class="muted">Rien à vérifier.</p><?php else: ?>
+  <table>
+    <thead><tr><th>Nom saisi</th><th>Élèves</th><th>Statut</th><th>Décision</th></tr></thead>
+    <tbody>
+    <?php foreach ($reviewRows as $r): $rv = $r['rev']; ?>
+      <tr>
+        <td><?= h($r['name']) ?></td><td><?= (int)$r['cnt'] ?></td>
+        <td><?= !$rv ? '⏳ en attente' : ($rv['status'] === 'ok' ? '✅ validé' . ($rv['merge_into'] ? ' → ' . h($rv['merge_into']) : '') : '✖ rejeté') ?></td>
+        <td>
+          <form method="post" class="inline">
+            <?= csrf_field() ?><input type="hidden" name="action" value="review"><input type="hidden" name="key" value="<?= h($r['name_key']) ?>"><input type="hidden" name="name" value="<?= h($r['name']) ?>">
+            <input name="merge" list="livret" placeholder="Fusionner avec… (facultatif)" value="<?= h($rv['merge_into'] ?? '') ?>" aria-label="Fusionner avec">
+            <button class="link" name="status" value="ok" type="submit">Valider</button>
+            <button class="link danger" name="status" value="no" type="submit">Rejeter</button>
+            <?php if ($rv): ?><button class="link" name="status" value="reset" type="submit">Annuler</button><?php endif; ?>
+          </form>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  <datalist id="livret"><?php foreach (taxons() as $t): ?><option value="<?= h($t['n']) ?>"><?php endforeach; ?></datalist>
+  <?php endif; ?>
 </section>
 
 <section class="card" id="securite">

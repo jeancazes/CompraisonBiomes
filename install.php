@@ -51,6 +51,7 @@ $schema = [
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 ];
 foreach ($schema as $sql) $db->exec($sql);
+migrate_schema($db);   // colonnes/tables ajoutées par les mises à jour (milieu, validation, revue des noms)
 
 // Migration depuis l'ancienne version (liaison par IP) : on passe à la liaison par appareil
 $cols = $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students'")->fetchAll(PDO::FETCH_COLUMN);

@@ -12,6 +12,7 @@ layout_head('Mes observations', 'student');
   <div class="who"><?= h($stu['name']) ?> · <?= h($stu['class_name']) ?> · <a href="logout.php">Quitter</a></div>
 </header>
 <main class="wrap">
+  <div id="inv-bar" class="card invbar"></div>
   <div id="tabs" class="tabs" role="tablist" aria-label="Biomes"></div>
   <section id="panel" class="card" aria-live="polite"><p class="muted">Chargement…</p></section>
 </main>

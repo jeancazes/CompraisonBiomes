@@ -39,14 +39,30 @@ function pdo(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
-        // Migration douce : milieu du livret associé à chaque biome (colonne ajoutée automatiquement)
+        // Migration douce (colonnes/tables ajoutées automatiquement après une mise à jour du site)
         try {
-            if (!$p->query("SHOW COLUMNS FROM biomes LIKE 'habitat'")->fetch()) {
-                $p->exec("ALTER TABLE biomes ADD COLUMN habitat VARCHAR(20) NULL");
-            }
+            $n = (int)$p->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (
+                (TABLE_NAME='biomes' AND COLUMN_NAME='habitat') OR (TABLE_NAME='students' AND COLUMN_NAME IN ('validated_at','draft_saved_at'))
+                OR (TABLE_NAME='classes' AND COLUMN_NAME='final_open'))")->fetchColumn();
+            if ($n < 4) migrate_schema($p);
         } catch (PDOException $e) { /* tables pas encore créées : install.php s'en charge */ }
     }
     return $p;
+}
+
+function migrate_schema(PDO $p): void
+{
+    $has = fn(string $t, string $c) => (bool)$p->query("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '$t' AND COLUMN_NAME = '$c'")->fetchColumn();
+    if (!$has('biomes', 'habitat')) $p->exec('ALTER TABLE biomes ADD COLUMN habitat VARCHAR(20) NULL');
+    if (!$has('students', 'validated_at')) $p->exec('ALTER TABLE students ADD COLUMN validated_at DATETIME NULL');
+    if (!$has('students', 'draft_saved_at')) $p->exec('ALTER TABLE students ADD COLUMN draft_saved_at DATETIME NULL');
+    if (!$has('classes', 'final_open')) $p->exec('ALTER TABLE classes ADD COLUMN final_open TINYINT(1) NOT NULL DEFAULT 0');
+    $p->exec("CREATE TABLE IF NOT EXISTS taxa_review (
+        name_key VARCHAR(120) NOT NULL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        status ENUM('ok','no') NOT NULL,
+        merge_into VARCHAR(120) NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
 function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -226,6 +242,71 @@ function taxon_habitat(string $name): ?string
     }
     return $idx[fold($name)] ?? null;
 }
+
+/**
+ * Indices de biodiversité par biome, à partir des inventaires VALIDÉS.
+ * $classIds : null = toutes les classes. $corrected : ne garde que les espèces valides
+ * (espèce du livret dans le bon milieu, ou nom hors livret approuvé par l'enseignant ; fusions appliquées).
+ * Abondance approchée par le nombre d'élèves ayant signalé l'espèce. @return array<int,array>
+ */
+function biodiversity(?array $classIds, bool $corrected, bool $validatedOnly = true): array
+{
+    $db = pdo();
+    $biomes = $db->query('SELECT id, habitat FROM biomes ORDER BY position, id')->fetchAll();
+    $res = [];
+    foreach ($biomes as $b) $res[(int)$b['id']] = ['S' => 0, 'N' => 0, 'J' => null, 'P' => 0, 'species' => []];
+    if ($classIds !== null && !$classIds) return $res;
+    $hab = array_column($biomes, 'habitat', 'id');
+    $rev = [];
+    foreach ($db->query('SELECT name_key, status, merge_into FROM taxa_review')->fetchAll() as $r) $rev[$r['name_key']] = $r;
+
+    $where = ($validatedOnly ? ' AND s.validated_at IS NOT NULL' : '')
+           . ($classIds !== null ? ' AND s.class_id IN (' . implode(',', array_map('intval', $classIds)) . ')' : '');
+    $rows = $db->query('SELECT o.biome_id, o.name_key, MIN(o.name) AS name, COUNT(*) AS cnt
+                        FROM observations o JOIN students s ON s.id = o.student_id
+                        WHERE 1=1' . $where . ' GROUP BY o.biome_id, o.name_key')->fetchAll();
+    foreach ($rows as $r) {
+        $bid = (int)$r['biome_id']; $key = $r['name_key']; $name = $r['name'];
+        if ($corrected) {
+            $th = taxon_habitat($name);
+            if ($th !== null) {
+                if (!empty($hab[$bid]) && $th !== $hab[$bid]) continue;       // espèce du livret hors de son milieu
+            } else {
+                $rv = $rev[$key] ?? null;
+                if (!$rv || $rv['status'] !== 'ok') continue;                 // hors livret non approuvé
+                if ($rv['merge_into']) { $name = canonical_name($rv['merge_into']); $key = name_key($name); }
+            }
+        }
+        $res[$bid]['species'][$key] = ['name' => $name, 'cnt' => ($res[$bid]['species'][$key]['cnt'] ?? 0) + (int)$r['cnt']];
+    }
+    $pq = $db->query('SELECT o.biome_id, COUNT(DISTINCT o.student_id) FROM observations o JOIN students s ON s.id = o.student_id
+                      WHERE 1=1' . $where . ' GROUP BY o.biome_id')->fetchAll(PDO::FETCH_KEY_PAIR);
+    foreach ($res as $bid => &$x) {
+        $x['P'] = (int)($pq[$bid] ?? 0);
+        $x['S'] = count($x['species']);
+        $x['N'] = array_sum(array_column($x['species'], 'cnt'));
+        if ($x['S'] > 1) {
+            $H = 0.0;
+            foreach ($x['species'] as $sp) { $pi = $sp['cnt'] / $x['N']; $H -= $pi * log($pi); }
+            $x['J'] = $H / log($x['S']);
+        }
+    }
+    return $res;
+}
+
+/** Nombre d'espèces valides distinctes (tous biomes confondus) et d'élèves ayant validé, pour un groupe de classes. */
+function class_summary(?array $classIds): array
+{
+    $stats = biodiversity($classIds, true);
+    $all = [];
+    foreach ($stats as $x) foreach ($x['species'] as $k => $_) $all[$k] = 1;
+    $in = $classIds === null ? '' : ($classIds ? ' WHERE class_id IN (' . implode(',', array_map('intval', $classIds)) . ')' : ' WHERE 1=0');
+    $tot = (int)pdo()->query('SELECT COUNT(*) FROM students' . $in)->fetchColumn();
+    $val = (int)pdo()->query('SELECT COUNT(*) FROM students' . ($in ? $in . ' AND' : ' WHERE') . ' validated_at IS NOT NULL')->fetchColumn();
+    return ['valid_species' => count($all), 'students' => $tot, 'validated' => $val];
+}
+
+function fmt_j(?float $j): string { return $j === null ? '—' : number_format($j, 2, ',', ''); }
 
 function name_key(string $s): string { return mb_strtolower(clean_name($s), 'UTF-8'); }
 
