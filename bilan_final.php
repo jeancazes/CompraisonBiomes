@@ -2,14 +2,23 @@
 declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
-$stu = current_student();
-if (!$stu) { header('Location: index.php'); exit; }
 $db = pdo();
-$cid = (int)$stu['class_id'];
-
-$fo = $db->prepare('SELECT final_open FROM classes WHERE id = ?');
-$fo->execute([$cid]);
-if (!$fo->fetchColumn()) { header('Location: classe.php'); exit; }
+$admin = is_admin() && isset($_GET['class_id']);          // aperçu enseignant
+if ($admin) {
+    $cid = (int)$_GET['class_id'];
+    $cn = $db->prepare('SELECT name FROM classes WHERE id = ?'); $cn->execute([$cid]);
+    $cname = $cn->fetchColumn();
+    if ($cname === false) { header('Location: admin.php'); exit; }
+    $stu = ['id' => 0, 'name' => 'Enseignant', 'class_name' => $cname, 'class_id' => $cid];
+} else {
+    $stu = current_student();
+    if (!$stu) { header('Location: index.php'); exit; }
+    $cid = (int)$stu['class_id'];
+    $fo = $db->prepare('SELECT final_open FROM classes WHERE id = ?');
+    $fo->execute([$cid]);
+    if (!$fo->fetchColumn()) { header('Location: classe.php'); exit; }
+}
+$qs = $admin ? '&class_id=' . $cid : '';
 
 $biomes = $db->query('SELECT id, name, emoji FROM biomes ORDER BY position, id')->fetchAll();
 $allClasses = $db->query('SELECT id FROM classes ORDER BY id')->fetchAll(PDO::FETCH_COLUMN);
@@ -21,15 +30,15 @@ layout_head('Bilan final', 'student');
 ?>
 <header class="top">
   <div><strong><?= h(SITE_TITLE) ?></strong></div>
-  <div class="who"><?= h($stu['name']) ?> · <?= h($stu['class_name']) ?> · <a href="classe.php">Bilan provisoire</a> · <a href="logout.php">Quitter</a></div>
+  <div class="who"><?php if ($admin): ?><a class="btn small" href="admin.php">← Administration</a> <a class="btn small ghost" href="classe.php?class_id=<?= $cid ?>">Bilan provisoire</a><?php else: ?><?= h($stu['name']) ?> · <?= h($stu['class_name']) ?> · <a href="classe.php">Bilan provisoire</a> · <a href="logout.php">Quitter</a><?php endif; ?></div>
 </header>
 <main class="wrap">
   <section class="card">
     <h2>Bilan final</h2>
     <nav class="switch" aria-label="Vue">
-      <a href="?vue=classe" class="<?= $vue === 'classe' ? 'on' : '' ?>">Ma classe</a>
-      <a href="?vue=toutes" class="<?= $vue === 'toutes' ? 'on' : '' ?>">Toutes les classes</a>
-      <a href="?vue=comparer" class="<?= $vue === 'comparer' ? 'on' : '' ?>">Comparer les classes</a>
+      <a href="?vue=classe<?= $qs ?>" class="<?= $vue === 'classe' ? 'on' : '' ?>">Ma classe</a>
+      <a href="?vue=toutes<?= $qs ?>" class="<?= $vue === 'toutes' ? 'on' : '' ?>">Toutes les classes</a>
+      <a href="?vue=comparer<?= $qs ?>" class="<?= $vue === 'comparer' ? 'on' : '' ?>">Comparer les classes</a>
     </nav>
     <p class="muted">« Non corrigé » : tous les noms saisis. « Corrigé » : seulement les espèces valides (du livret, dans le bon milieu, ou noms vérifiés par l'enseignant ; les synonymes sont regroupés).</p>
   </section>
@@ -46,7 +55,7 @@ layout_head('Bilan final', 'student');
       <div class="kpi"><b><?= $sum['valid_species'] ?></b>espèces valides inventoriées</div>
       <div class="kpi"><b><?= $sum['validated'] ?> / <?= $sum['students'] ?></b>inventaires validés</div>
     </div>
-    <table class="stats">
+    <div class="stats-wrap"><table class="stats">
       <thead><tr><th>Biome</th><th>S non corrigé</th><th>S corrigé</th><th>J non corrigé</th><th>J corrigé</th></tr></thead>
       <tbody>
       <?php foreach ($biomes as $b): $i = (int)$b['id']; ?>
@@ -54,7 +63,7 @@ layout_head('Bilan final', 'student');
             <td><?= fmt_j($raw[$i]['J']) ?></td><td><strong><?= fmt_j($cor[$i]['J']) ?></strong></td></tr>
       <?php endforeach; ?>
       </tbody>
-    </table>
+    </table></div>
     <h3>Richesse spécifique (nombre d'espèces)</h3>
     <?php foreach ($biomes as $b): $i = (int)$b['id']; ?>
       <div class="bar-row"><span class="bar-label"><?= h($lab($b)) ?> · corrigé</span>
@@ -76,7 +85,7 @@ layout_head('Bilan final', 'student');
   foreach ($biomes as $b): $i = (int)$b['id']; ?>
   <section class="card">
     <h3><?= h($lab($b)) ?></h3>
-    <table class="stats">
+    <div class="stats-wrap"><table class="stats">
       <thead><tr><th>Classe</th><th>S non corr.</th><th>S corrigé</th><th>J non corr.</th><th>J corrigé</th></tr></thead>
       <tbody>
       <?php foreach ($per as $classId => $d): ?>
@@ -84,7 +93,7 @@ layout_head('Bilan final', 'student');
           <td><?= $d['raw'][$i]['S'] ?></td><td><?= $d['cor'][$i]['S'] ?></td><td><?= fmt_j($d['raw'][$i]['J']) ?></td><td><?= fmt_j($d['cor'][$i]['J']) ?></td></tr>
       <?php endforeach; ?>
       </tbody>
-    </table>
+    </table></div>
   </section>
   <?php endforeach; ?>
   <p class="muted">Les autres classes sont anonymes. Attention : la richesse dépend aussi du nombre d'élèves et du temps passé sur le terrain.</p>

@@ -5,10 +5,20 @@
   var data = [];
   var current = null;      // id du biome affiché
   var flash = '';
+  var flashBad = false;
   var typing = false;
   var me = { validated: false, draft: null };
   var invBar = document.getElementById('inv-bar');
   var confirming = false;
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+  function toast(msg, bad) {
+    if (!msg) return;
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show' + (bad ? ' bad' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.className = 'toast' + (bad ? ' bad' : ''); }, 3200);
+  }
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -69,37 +79,55 @@
     panel.appendChild(el('h2', { text: (b.emoji ? b.emoji + ' ' : '') + b.name }));
     if (b.description) panel.appendChild(el('p', { class: 'muted', text: b.description }));
 
-    var input = el('input', { type: 'text', name: 'name', maxlength: '80', list: 'dl', autocomplete: 'off',
-      placeholder: 'Nom d’un être vivant (ex. : Escargot de Bourgogne)', required: 'required' });
-    var dl = el('datalist', { id: 'dl' });
-    // Autocomplétion à partir de 5 lettres : livret (nom français ou latin) + noms déjà saisis par la classe
+    var input = el('input', { type: 'text', name: 'name', maxlength: '80', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      placeholder: 'Nom d’un être vivant (ex. : Lierre)', required: 'required', 'aria-autocomplete': 'list' });
+    var sugg = el('ul', { class: 'sugg', role: 'listbox', hidden: 'hidden' });
+    var wrapEl = el('div', { class: 'suggest-wrap' }, [input, sugg]);
+    // Autocomplétion à partir de 5 lettres : livret (nom français ou latin, milieu du biome) + noms déjà saisis par la classe
     function fold(x) { return x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/œ/g, 'oe').replace(/[^a-z0-9]+/g, ' ').trim(); }
+    var sel = -1;
+    function hideSugg() { sugg.setAttribute('hidden', 'hidden'); sugg.textContent = ''; sel = -1; }
+    function pick(name) { input.value = name; hideSugg(); input.focus(); }
     function suggest() {
-      dl.textContent = '';
+      sugg.textContent = ''; sel = -1;
       var q = fold(input.value);
-      if (q.length < 5) return;
+      if (q.length < 5) { hideSugg(); return; }
       var seen = {}, n = 0;
-      function add(name, label) {
-        if (n >= 12 || seen[name]) return;
+      function add(name, latin, tag) {
+        if (n >= 10 || seen[name]) return;
         seen[name] = 1; n++;
-        var o = el('option', { value: name }); if (label) o.label = label; dl.appendChild(o);
+        var li = el('li', { role: 'option' }, [el('b', { text: name }), latin ? el('i', { text: latin }) : null, tag ? el('span', { class: 'tag', text: tag }) : null]);
+        li.addEventListener('mousedown', function (e) { e.preventDefault(); pick(name); });
+        li.addEventListener('touchstart', function () { pick(name); }, { passive: true });
+        sugg.appendChild(li);
       }
-      taxons.forEach(function (t) { if (b.habitat && t[2] !== b.habitat) return; if (fold(t[0]).indexOf(q) !== -1 || fold(t[1]).indexOf(q) !== -1) add(t[0], t[1]); });
-      b.species.forEach(function (s) { if (fold(s.name).indexOf(q) !== -1) add(s.name, ''); });
+      taxons.forEach(function (t) { if (b.habitat && t[2] !== b.habitat) return; if (fold(t[0]).indexOf(q) !== -1 || fold(t[1]).indexOf(q) !== -1) add(t[0], t[1], 'livret'); });
+      b.species.forEach(function (s) { if (fold(s.name).indexOf(q) !== -1) add(s.name, '', 'déjà noté par la classe'); });
+      if (n) sugg.removeAttribute('hidden'); else hideSugg();
     }
     input.addEventListener('input', suggest);
-    var form = el('form', { class: 'addform' }, [input, dl, el('button', { class: 'btn', type: 'submit', text: 'Ajouter' })]);
+    input.addEventListener('keydown', function (e) {
+      var items = sugg.querySelectorAll('li');
+      if (!items.length || sugg.hasAttribute('hidden')) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items.forEach(function (li, i) { li.className = i === sel ? 'sel' : ''; });
+      } else if (e.key === 'Enter' && sel >= 0) { e.preventDefault(); pick(items[sel].querySelector('b').textContent); }
+      else if (e.key === 'Escape') hideSugg();
+    });
+    var form = el('form', { class: 'addform' }, [wrapEl, el('button', { class: 'btn', type: 'submit', text: 'Ajouter' })]);
     input.addEventListener('focus', function () { typing = true; });
-    input.addEventListener('blur', function () { typing = false; });
+    input.addEventListener('blur', function () { typing = false; setTimeout(hideSugg, 150); });
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var v = input.value.trim();
       if (!v) return;
-      post('add', b.id, { name: v }).then(function (j) { flash = j.message || ''; return load(); });
+      hideSugg();
+      post('add', b.id, { name: v }).then(function (j) { flash = j.message || ''; flashBad = !j.ok; return load(); });
     });
     if (me.validated) { input.disabled = true; form.querySelector('button').disabled = true; }
     panel.appendChild(form);
-    if (flash) panel.appendChild(el('p', { class: 'flash', text: flash }));
 
     var n = b.species.length;
     panel.appendChild(el('h3', { text: n + ' espèce' + (n > 1 ? 's' : '') + ' dans ce biome' }));
@@ -130,39 +158,53 @@
     panel.appendChild(list);
   }
 
-  function renderBar() {
-    invBar.textContent = '';
-    if (me.validated) {
-      var re = el('button', { type: 'button', class: 'btn small ghost', text: 'Rouvrir mon inventaire' });
-      re.addEventListener('click', function () { post('reopen', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
-      invBar.appendChild(el('span', { text: '✅ Inventaire validé. ' }));
-      invBar.appendChild(el('a', { class: 'btn small', href: 'classe.php', text: 'Voir le bilan de la classe' }));
-      invBar.appendChild(re);
-      return;
-    }
-    var total = data.reduce(function (n, b) { return n + b.species.filter(function (s) { return s.mine; }).length; }, 0);
-    var draft = el('button', { type: 'button', class: 'btn small ghost', text: '💾 Enregistrer le brouillon' });
-    draft.addEventListener('click', function () { post('draft', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
-    var val = el('button', { type: 'button', class: 'btn small', text: confirming ? 'Confirmer : je valide, je ne pourrai plus modifier sans rouvrir' : '✅ Valider l’inventaire' });
-    val.addEventListener('click', function () {
-      if (!confirming) { confirming = true; renderBar(); return; }
-      post('validate', 0, {}).then(function (j) {
-        confirming = false;
-        if (j.redirect) { location.href = j.redirect; return; }
-        flash = j.message || ''; return load();
-      });
-    });
-    invBar.appendChild(el('span', { class: 'muted', text: total + ' observation' + (total > 1 ? 's' : '') + ' · ' + (me.draft ? 'brouillon enregistré à ' + me.draft : 'brouillon non enregistré') + ' (les ajouts sont gardés automatiquement) ' }));
-    invBar.appendChild(draft);
-    invBar.appendChild(val);
-    if (confirming) {
-      var cancel = el('button', { type: 'button', class: 'link', text: 'Annuler' });
-      cancel.addEventListener('click', function () { confirming = false; renderBar(); });
-      invBar.appendChild(cancel);
-    }
+  function lbl(icon, long, short) {
+    return [el('span', { text: icon + ' ' }), el('span', { class: 'lg', text: long }), el('span', { class: 'sm', text: short })];
+  }
+  function btn(cls, parts, extra) {
+    var b = el('button', Object.assign({ type: 'button', class: cls }, extra || {}));
+    parts.forEach(function (p) { b.appendChild(p); });
+    return b;
   }
 
-  function render() { renderBar(); renderTabs(); renderPanel(); }
+  function renderBar() {
+    invBar.textContent = '';
+    var inner = el('div', { class: 'invbar-in' });
+    var info = el('div', { class: 'inv-info' });
+    var actions = el('div', { class: 'inv-actions' });
+    if (me.validated) {
+      info.textContent = '✅ Inventaire validé';
+      var re = el('button', { type: 'button', class: 'btn ghost', text: 'Rouvrir' });
+      re.addEventListener('click', function () { post('reopen', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
+      actions.appendChild(re);
+      actions.appendChild(el('a', { class: 'btn', href: 'classe.php', text: 'Bilan de la classe' }));
+    } else if (confirming) {
+      info.textContent = 'Valider ? Tu ne pourras plus modifier sans rouvrir ton inventaire.';
+      var no = el('button', { type: 'button', class: 'btn ghost', text: 'Annuler' });
+      no.addEventListener('click', function () { confirming = false; renderBar(); });
+      var yes = el('button', { type: 'button', class: 'btn', text: 'Oui, valider' });
+      yes.addEventListener('click', function () {
+        post('validate', 0, {}).then(function (j) {
+          confirming = false;
+          if (j.redirect) { location.href = j.redirect; return; }
+          flash = j.message || ''; flashBad = !j.ok; return load();
+        });
+      });
+      actions.appendChild(no); actions.appendChild(yes);
+    } else {
+      var total = data.reduce(function (n, b) { return n + b.species.filter(function (s) { return s.mine; }).length; }, 0);
+      info.textContent = total + ' observation' + (total > 1 ? 's' : '') + ' · ' + (me.draft ? 'brouillon à ' + me.draft : 'brouillon non enregistré');
+      var draft = btn('btn ghost', lbl('💾', 'Enregistrer le brouillon', 'Brouillon'));
+      draft.addEventListener('click', function () { post('draft', 0, {}).then(function (j) { flash = j.message || ''; return load(); }); });
+      var val = btn('btn', lbl('✅', 'Valider l’inventaire', 'Valider'));
+      val.addEventListener('click', function () { confirming = true; renderBar(); });
+      actions.appendChild(draft); actions.appendChild(val);
+    }
+    inner.appendChild(info); inner.appendChild(actions);
+    invBar.appendChild(inner);
+  }
+
+  function render() { renderBar(); renderTabs(); renderPanel(); if (flash) { toast(flash, flashBad || /^✖|limite|expir/i.test(flash)); flash = ''; flashBad = false; } }
 
   load();
   // Rafraîchit toutes les 20 s (sauf pendant la saisie) pour voir les ajouts des camarades

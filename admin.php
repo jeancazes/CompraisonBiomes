@@ -191,7 +191,16 @@ layout_head('Administration', 'admin');
   <div><strong>Administration</strong></div>
   <nav class="who">
     <a href="#biomes">Biomes</a> · <a href="#classes">Classes</a> · <a href="#revue">Noms hors livret<?= $nPending ? " (" . $nPending . ")" : "" ?></a> · <a href="#securite">Sécurité</a> ·
-    <a class="btn small" href="bilan.php">Bilan</a>
+    <details class="menu"><summary class="btn small ghost">📊 Bilans ▾</summary>
+      <div class="menu-pop">
+        <div class="m-row"><strong>Enseignant</strong><a class="btn small" href="bilan.php">Bilan complet</a></div>
+        <?php foreach ($classes as $mc): ?>
+          <div class="m-row"><span><?= h($mc['name']) ?></span>
+            <span><a class="btn small ghost" href="classe.php?class_id=<?= (int)$mc['id'] ?>">Provisoire</a>
+            <a class="btn small" href="bilan_final.php?class_id=<?= (int)$mc['id'] ?>">Final</a></span></div>
+        <?php endforeach; ?>
+      </div></details>
+    
     <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="action" value="logout"><button class="link" type="submit">Déconnexion</button></form>
   </nav>
 </header>
@@ -266,6 +275,8 @@ layout_head('Administration', 'admin');
         <button class="btn small" type="submit">Ajouter</button>
       </form>
       <div class="right">
+        <a class="link" href="classe.php?class_id=<?= $cid ?>">👁 Bilan provisoire</a>
+        <a class="link" href="bilan_final.php?class_id=<?= $cid ?>">👁 Bilan final</a>
         <?= confirm_form('class_publish', $cid, $c['final_open'] ? '🔒 Masquer le bilan final aux élèves' : '📣 Publier le bilan final aux élèves', $c['final_open'] ? 'Masquer le bilan final ?' : 'Publier le bilan final pour cette classe ?', 'link') ?>
         <?= confirm_form('class_reset_ip', $cid, 'Débloquer toute la classe', 'Débloquer tous les noms de la classe ?', 'link') ?>
         <?= confirm_form('class_clear_obs', $cid, 'Effacer les observations', 'Effacer toutes les observations de cette classe ?') ?>
