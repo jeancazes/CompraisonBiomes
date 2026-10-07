@@ -96,16 +96,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             back("Observations de la classe effacées.", 'classes');
 
         case 'students_add':
-            $names = preg_split('/\R/u', (string)($_POST['names'] ?? '')) ?: [];
+            $names = parse_student_list((string)($_POST['names'] ?? ''));
             $ins = $db->prepare('INSERT IGNORE INTO students (class_id, name) VALUES (?,?)');
-            $n = 0;
+            $n = 0; $skip = 0;
             foreach ($names as $nm) {
                 $nm = mb_substr(clean_name($nm), 0, 80);
                 if ($nm === '') continue;
                 $ins->execute([$id, $nm]);
-                $n += $ins->rowCount();
+                if ($ins->rowCount()) $n++; else $skip++;
             }
-            back($n . ' élève(s) ajouté(s).', 'class-' . $id);
+            back($n . ' élève(s) ajouté(s)' . ($skip ? ', ' . $skip . ' doublon(s) ignoré(s)' : '') . '.', 'class-' . $id);
 
         case 'student_delete':
             $cid = (int)($_POST['class_id'] ?? 0);
@@ -224,8 +224,8 @@ layout_head('Administration', 'admin');
       </table>
       <form method="post">
         <?= csrf_field() ?><input type="hidden" name="action" value="students_add"><input type="hidden" name="id" value="<?= $cid ?>">
-        <label>Ajouter des élèves (un nom par ligne — colle ta liste de classe)
-          <textarea name="names" rows="4" placeholder="Prénom Nom&#10;Prénom Nom"></textarea></label>
+        <label>Ajouter des élèves — colle ta liste (un nom par ligne) ou un CSV/tableur avec colonnes « Nom » et « Prénom » : les autres colonnes sont ignorées
+          <textarea name="names" rows="5" placeholder="Nom;Prénom;Classe;Date&#10;MARTIN;Léa;6A;2014"></textarea></label>
         <button class="btn small" type="submit">Ajouter</button>
       </form>
       <div class="right">
