@@ -164,9 +164,11 @@ function parse_student_list(string $text): array
             $v = $r[$iN ?? $iF] ?? '';
             if ($v !== '') $out[] = $iN !== null ? clean_name($v) : $v;
         } else {                                           // pas d'en-tête : 2 premières colonnes « texte »
-            $w = array_values(array_filter($r, fn($v) => $v !== '' && $isWord($v)));
-            if (count($w) >= 2) $out[] = $fmt($w[0], $w[1]);
-            elseif (count($w) === 1) $out[] = $w[0];
+            $a = $r[0] ?? '';
+            if ($a === '' || !$isWord($a)) continue;           // ligne de titre, chiffres, vide…
+            if (preg_match('/\s/u', $a)) { $out[] = $a; continue; }   // « NOM Prénom » déjà dans une seule cellule
+            $b = $r[1] ?? '';
+            if ($b !== '' && $isWord($b)) $out[] = $fmt($a, $b);   // colonnes Nom ; Prénom sans en-tête
         }
     }
     return $out;

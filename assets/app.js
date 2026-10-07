@@ -24,6 +24,10 @@
       .then(function (r) { return r.json(); });
   }
 
+  var taxons = [];
+  fetch('api.php?taxons=1', { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+    .then(function (j) { taxons = j.taxons || []; }).catch(function () {});
+
   function load() {
     return fetch('api.php', { credentials: 'same-origin' })
       .then(function (r) {
@@ -64,7 +68,22 @@
     var input = el('input', { type: 'text', name: 'name', maxlength: '80', list: 'dl', autocomplete: 'off',
       placeholder: 'Nom d’un être vivant (ex. : Escargot de Bourgogne)', required: 'required' });
     var dl = el('datalist', { id: 'dl' });
-    b.species.forEach(function (s) { dl.appendChild(el('option', { value: s.name })); });
+    // Autocomplétion à partir de 5 lettres : livret (nom français ou latin) + noms déjà saisis par la classe
+    function fold(x) { return x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/œ/g, 'oe').replace(/[^a-z0-9]+/g, ' ').trim(); }
+    function suggest() {
+      dl.textContent = '';
+      var q = fold(input.value);
+      if (q.length < 5) return;
+      var seen = {}, n = 0;
+      function add(name, label) {
+        if (n >= 12 || seen[name]) return;
+        seen[name] = 1; n++;
+        var o = el('option', { value: name }); if (label) o.label = label; dl.appendChild(o);
+      }
+      taxons.forEach(function (t) { if (fold(t[0]).indexOf(q) !== -1 || fold(t[1]).indexOf(q) !== -1) add(t[0], t[1]); });
+      b.species.forEach(function (s) { if (fold(s.name).indexOf(q) !== -1) add(s.name, ''); });
+    }
+    input.addEventListener('input', suggest);
     var form = el('form', { class: 'addform' }, [input, dl, el('button', { class: 'btn', type: 'submit', text: 'Ajouter' })]);
     input.addEventListener('focus', function () { typing = true; });
     input.addEventListener('blur', function () { typing = false; });

@@ -16,6 +16,11 @@ if (!$stu) out(['ok' => false, 'message' => 'Session expirée, reconnecte-toi.']
 $db = pdo();
 $method = $_SERVER['REQUEST_METHOD'];
 
+if ($method === 'GET' && isset($_GET['taxons'])) {
+    header('Cache-Control: private, max-age=3600');
+    out(['ok' => true, 'taxons' => array_map(fn($x) => [$x['n'], $x['l']], taxons())]);
+}
+
 if ($method === 'GET') {
     $biomes = $db->query('SELECT id, name, emoji, description FROM biomes ORDER BY position, id')->fetchAll();
     $st = $db->prepare(
@@ -54,6 +59,7 @@ if (!$chk->fetchColumn()) out(['ok' => false, 'message' => 'Biome inconnu.'], 40
 
 if ($action === 'add') {
     $name = clean_name((string)($_POST['name'] ?? ''));
+    $name = canonical_name($name);   // « Hedera helix » → « Lierre » : les synonymes comptent pour une seule espèce
     $len = mb_strlen($name, 'UTF-8');
     if ($len < 2 || $len > 80 || !preg_match('/\p{L}/u', $name)) {
         out(['ok' => false, 'message' => 'Écris un nom entre 2 et 80 caractères.']);
