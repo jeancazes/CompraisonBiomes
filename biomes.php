@@ -8,7 +8,7 @@ if (!$stu) { header('Location: index.php'); exit; }
 layout_head('Mes observations', 'student');
 ?>
 <header class="top">
-  <div><strong>🌿 <?= h(SITE_TITLE) ?></strong></div>
+  <div><strong><?= h(SITE_TITLE) ?></strong></div>
   <div class="who"><?= h($stu['name']) ?> · <?= h($stu['class_name']) ?> · <a href="logout.php">Quitter</a></div>
 </header>
 <main class="wrap">

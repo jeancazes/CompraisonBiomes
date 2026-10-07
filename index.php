@@ -7,37 +7,45 @@ if (current_student()) { header('Location: biomes.php'); exit; }
 $db = pdo();
 $error = '';
 
-// Connexion élève : classe + nom, avec règle « un nom = une seule IP »
+// Connexion élève : classe + nom. Le nom est lié au 1er appareil (cookie) qui l'utilise.
+// L'IP ne bloque plus : elle est seulement mémorisée pour information.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $cid = (int)($_POST['class_id'] ?? 0);
     $sid = (int)($_POST['student_id'] ?? 0);
-    $st = $db->prepare('SELECT id, ip_hash FROM students WHERE id = ? AND class_id = ?');
+    $st = $db->prepare('SELECT id, device_hash FROM students WHERE id = ? AND class_id = ?');
     $st->execute([$sid, $cid]);
     $stu = $st->fetch();
     if (!$stu) {
         $error = 'Choisis ton nom dans la liste.';
     } else {
-        $me = client_ip_hash();
-        if ($stu['ip_hash'] === null) {
-            // Première connexion : on lie ce nom à cette IP (atomique)
-            $up = $db->prepare('UPDATE students SET ip_hash = ?, bound_at = NOW() WHERE id = ? AND ip_hash IS NULL');
-            $up->execute([$me, $sid]);
-            if ($up->rowCount() === 0) { // quelqu'un d'autre vient de le lier : on revérifie
-                $st->execute([$sid, $cid]);
-                $stu = $st->fetch();
-            } else {
-                $stu['ip_hash'] = $me;
-            }
+        $cookie = 'biodiv_d' . $sid;
+        $tok = (string)($_COOKIE[$cookie] ?? '');
+        $ok = false;
+
+        if ($stu['device_hash'] === null) {
+            // Premier appareil : on le lie à ce nom (atomique)
+            $tok = bin2hex(random_bytes(24));
+            $up = $db->prepare('UPDATE students SET device_hash = ?, bound_at = NOW() WHERE id = ? AND device_hash IS NULL');
+            $up->execute([hash('sha256', $tok), $sid]);
+            $ok = $up->rowCount() === 1;   // sinon un camarade vient de le prendre
+        } elseif ($tok !== '' && hash_equals($stu['device_hash'], hash('sha256', $tok))) {
+            $ok = true;
         }
-        if ($stu['ip_hash'] !== null && hash_equals($stu['ip_hash'], $me)) {
+
+        if ($ok) {
+            setcookie($cookie, $tok, [
+                'expires' => time() + 400 * 86400, 'path' => '/', 'httponly' => true,
+                'samesite' => 'Lax', 'secure' => !empty($_SERVER['HTTPS']),
+            ]);
+            log_student_ip($sid);
             session_regenerate_id(true);
             $_SESSION['student_id'] = $sid;
             header('Location: biomes.php');
             exit;
         }
-        $error = "Ce nom est déjà utilisé depuis une autre connexion Internet. "
-               . "Si c'est bien toi, demande à ton enseignant de réinitialiser ton accès.";
+        $error = "Ce nom est déjà utilisé sur un autre appareil. "
+               . "Si c'est bien toi (nouvel appareil, navigateur vidé), demande à ton enseignant de débloquer ton nom.";
     }
 }
 
@@ -56,7 +64,7 @@ if ($selected) {
 }
 
 layout_head('Connexion');
-echo '<main class="card narrow"><h1>🌿 ', h(SITE_TITLE), '</h1>';
+echo '<main class="card narrow"><h1>', h(SITE_TITLE), '</h1>';
 if ($error) echo '<p class="err">', h($error), '</p>';
 
 if (!$classes) {

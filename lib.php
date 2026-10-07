@@ -73,6 +73,13 @@ function client_ip_hash(): string
     return hash_hmac('sha256', $bin !== false ? $bin : $ip, IP_SALT);
 }
 
+/** Mémorise (hachée) l'IP utilisée par l'élève : simple information pour l'enseignant, ne bloque jamais. */
+function log_student_ip(int $studentId): void
+{
+    pdo()->prepare('INSERT INTO student_ips (student_id, ip_hash, first_seen, last_seen) VALUES (?,?,NOW(),NOW())
+                    ON DUPLICATE KEY UPDATE last_seen = NOW()')->execute([$studentId, client_ip_hash()]);
+}
+
 function setting(string $k): ?string
 {
     $st = pdo()->prepare('SELECT v FROM settings WHERE k = ?');

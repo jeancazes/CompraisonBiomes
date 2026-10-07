@@ -49,7 +49,7 @@ $ids = array_keys($stats);
 layout_head('Bilan', 'admin');
 ?>
 <header class="top">
-  <div><strong>📊 Bilan de biodiversité</strong></div>
+  <div><strong>Bilan de biodiversité</strong></div>
   <nav class="who"><a href="admin.php">← Administration</a></nav>
 </header>
 <main class="wrap">
@@ -63,7 +63,8 @@ layout_head('Bilan', 'admin');
       </select>
     </label>
     <noscript><button class="btn small">Afficher</button></noscript>
-    <button class="btn small" type="button" onclick="window.print()">🖨 Imprimer</button>
+    <a class="btn small" href="export.php?class_id=<?= $cid ?>">⬇ Export CSV</a>
+    <button class="btn small" type="button" onclick="window.print()">Imprimer</button>
   </form>
 
   <?php if (!$biomes): ?><p class="card muted">Aucun biome défini.</p><?php else: ?>

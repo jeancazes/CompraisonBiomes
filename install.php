@@ -17,10 +17,18 @@ $schema = [
   id INT AUTO_INCREMENT PRIMARY KEY,
   class_id INT NOT NULL,
   name VARCHAR(80) NOT NULL,
-  ip_hash CHAR(64) NULL,
+  device_hash CHAR(64) NULL,
   bound_at DATETIME NULL,
   UNIQUE KEY uq_class_name (class_id, name),
   CONSTRAINT fk_st_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"CREATE TABLE IF NOT EXISTS student_ips (
+  student_id INT NOT NULL,
+  ip_hash CHAR(64) NOT NULL,
+  first_seen DATETIME NOT NULL,
+  last_seen DATETIME NOT NULL,
+  PRIMARY KEY (student_id, ip_hash),
+  CONSTRAINT fk_ip_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 "CREATE TABLE IF NOT EXISTS biomes (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -43,6 +51,13 @@ $schema = [
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 ];
 foreach ($schema as $sql) $db->exec($sql);
+
+// Migration depuis l'ancienne version (liaison par IP) : on passe à la liaison par appareil
+$cols = $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students'")->fetchAll(PDO::FETCH_COLUMN);
+if (in_array('ip_hash', $cols, true) && !in_array('device_hash', $cols, true)) {
+    $db->exec('ALTER TABLE students DROP COLUMN ip_hash, ADD COLUMN device_hash CHAR(64) NULL AFTER name');
+    $db->exec('UPDATE students SET bound_at = NULL');
+}
 
 $msg = '';
 $done = setting('admin_hash') !== null;

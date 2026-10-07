@@ -1,0 +1,15 @@
+INSTALLATION (serveur EX2 - PHP 8+ / MySQL)
+1. Dans phpMyAdmin / hPanel : créer une base MySQL + un utilisateur.
+2. Ouvrir config.php : renseigner DB_*, IP_SALT (longue chaîne aléatoire), INSTALL_KEY.
+3. Déposer tout le dossier "biodiversite" sur le serveur (FTP / gestionnaire de fichiers).
+4. Ouvrir https://votre-site/biodiversite/install.php : crée les tables + mot de passe admin.
+5. SUPPRIMER install.php du serveur.
+6. https://votre-site/biodiversite/admin.php : créer les biomes, les classes, coller les listes d'élèves,
+   puis copier l'adresse propre à chaque classe (champ "Adresse à donner à la classe").
+7. Bouton "Bilan" en haut de l'admin : richesse spécifique + équitabilité de Pielou + comparaison.
+
+RÈGLE NOM / APPAREIL
+Un nom est lié au premier appareil (navigateur, cookie) qui l'utilise. Autre appareil => refus.
+Admin > classe > "Débloquer" pour autoriser un nouvel appareil (ou toute la classe).
+L'IP (hachée) est seulement comptée pour information, elle ne bloque jamais.
+Installation existante : rouvrir install.php (migration automatique), puis le supprimer.

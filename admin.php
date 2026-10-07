@@ -23,7 +23,7 @@ if (!is_admin()) {
         $err = 'Mot de passe incorrect.';
     }
     layout_head('Administration');
-    echo '<main class="card narrow"><h1>🔐 Espace enseignant</h1>';
+    echo '<main class="card narrow"><h1>Espace enseignant</h1>';
     if ($err) echo '<p class="err">', h($err), '</p>';
     echo '<form method="post">', csrf_field(),
          '<label>Mot de passe<input type="password" name="pw" required autofocus></label>',
@@ -114,12 +114,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         case 'student_reset_ip':
             $cid = (int)($_POST['class_id'] ?? 0);
-            $db->prepare('UPDATE students SET ip_hash=NULL, bound_at=NULL WHERE id=?')->execute([$id]);
-            back('Liaison IP réinitialisée : le prochain appareil à se connecter avec ce nom sera mémorisé.', 'class-' . $cid);
+            $db->prepare('UPDATE students SET device_hash=NULL, bound_at=NULL WHERE id=?')->execute([$id]);
+            back('Nom débloqué : le prochain appareil qui se connecte avec ce nom sera mémorisé.', 'class-' . $cid);
 
         case 'class_reset_ip':
-            $db->prepare('UPDATE students SET ip_hash=NULL, bound_at=NULL WHERE class_id=?')->execute([$id]);
-            back('Liaisons IP de la classe réinitialisées.', 'class-' . $id);
+            $db->prepare('UPDATE students SET device_hash=NULL, bound_at=NULL WHERE class_id=?')->execute([$id]);
+            back('Tous les noms de la classe sont débloqués.', 'class-' . $id);
 
         case 'password':
             $pw = (string)($_POST['pw'] ?? '');
@@ -135,7 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $biomes = $db->query('SELECT * FROM biomes ORDER BY position, id')->fetchAll();
 $classes = $db->query('SELECT * FROM classes ORDER BY name')->fetchAll();
 $stuByClass = [];
-foreach ($db->query('SELECT s.*, (SELECT COUNT(*) FROM observations o WHERE o.student_id=s.id) AS nobs
+foreach ($db->query('SELECT s.*, (SELECT COUNT(*) FROM observations o WHERE o.student_id=s.id) AS nobs,
+                            (SELECT COUNT(*) FROM student_ips i WHERE i.student_id=s.id) AS nips
                      FROM students s ORDER BY s.name')->fetchAll() as $s) {
     $stuByClass[(int)$s['class_id']][] = $s;
 }
@@ -154,10 +155,10 @@ function confirm_form(string $action, int $id, string $label, string $confirm, s
 layout_head('Administration', 'admin');
 ?>
 <header class="top">
-  <div><strong>🔐 Administration</strong></div>
+  <div><strong>Administration</strong></div>
   <nav class="who">
     <a href="#biomes">Biomes</a> · <a href="#classes">Classes</a> · <a href="#securite">Sécurité</a> ·
-    <a class="btn small" href="bilan.php">📊 Bilan</a>
+    <a class="btn small" href="bilan.php">Bilan</a>
     <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="action" value="logout"><button class="link" type="submit">Déconnexion</button></form>
   </nav>
 </header>
@@ -205,15 +206,16 @@ layout_head('Administration', 'admin');
         <input class="url" readonly value="<?= h($url) ?>" onclick="this.select()">
       </p>
       <table>
-        <thead><tr><th>Nom</th><th>Obs.</th><th>Connexion liée</th><th></th></tr></thead>
+        <thead><tr><th>Nom</th><th>Obs.</th><th>Appareil lié</th><th>IP vues</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($list as $s): ?>
           <tr>
             <td><?= h($s['name']) ?></td>
             <td><?= (int)$s['nobs'] ?></td>
-            <td><?= $s['ip_hash'] ? '🔒 ' . h(substr((string)$s['bound_at'], 0, 16)) : '—' ?></td>
+            <td><?= $s['device_hash'] ? '🔒 ' . h(substr((string)$s['bound_at'], 0, 16)) : '—' ?></td>
+            <td><?= (int)$s['nips'] ?><?= (int)$s['nips'] >= 4 ? ' ⚠' : '' ?></td>
             <td class="acts">
-              <?php if ($s['ip_hash']) echo confirm_form('student_reset_ip', (int)$s['id'], 'Réinitialiser IP', "Autoriser ce nom à se relier à une nouvelle connexion ?", 'link', ['class_id' => $cid]); ?>
+              <?php if ($s['device_hash']) echo confirm_form('student_reset_ip', (int)$s['id'], 'Débloquer', "Autoriser ce nom à se relier à un nouvel appareil ?", 'link', ['class_id' => $cid]); ?>
               <?= confirm_form('student_delete', (int)$s['id'], 'Supprimer', 'Supprimer cet élève et ses observations ?', 'link danger', ['class_id' => $cid]) ?>
             </td>
           </tr>
@@ -227,7 +229,7 @@ layout_head('Administration', 'admin');
         <button class="btn small" type="submit">Ajouter</button>
       </form>
       <div class="right">
-        <?= confirm_form('class_reset_ip', $cid, 'Réinitialiser toutes les IP', 'Réinitialiser les liaisons IP de toute la classe ?', 'link') ?>
+        <?= confirm_form('class_reset_ip', $cid, 'Débloquer toute la classe', 'Débloquer tous les noms de la classe ?', 'link') ?>
         <?= confirm_form('class_clear_obs', $cid, 'Effacer les observations', 'Effacer toutes les observations de cette classe ?') ?>
         <?= confirm_form('class_delete', $cid, 'Supprimer la classe', 'Supprimer la classe, ses élèves et leurs observations ?') ?>
       </div>
@@ -237,7 +239,7 @@ layout_head('Administration', 'admin');
 
 <section class="card" id="securite">
   <h2>Sécurité</h2>
-  <p class="muted">Règle appliquée : un nom d'élève est lié à la <strong>première connexion Internet</strong> qui l'utilise. Depuis une autre connexion (autre réseau, 4G…), l'accès est refusé jusqu'à ce que tu cliques sur « Réinitialiser IP ». Au collège, tous les appareils partagent souvent la même IP : la règle protège alors contre une utilisation <em>depuis l'extérieur</em>, pas entre camarades du même établissement.</p>
+  <p class="muted">Règle appliquée : un nom d'élève est lié au <strong>premier appareil (navigateur)</strong> qui l'utilise, via un cookie. Un autre appareil est refusé jusqu'à ce que tu cliques sur « Débloquer ». L'adresse IP ne bloque rien : elle est seulement comptée (colonne « IP vues », ⚠ si 4 IP différentes ou plus). Limite : sur une tablette partagée, un camarade peut se connecter sous le nom d'un élève qui s'y est déjà connecté ; surveille cela en classe.</p>
   <form method="post" class="row">
     <?= csrf_field() ?><input type="hidden" name="action" value="password">
     <input type="password" name="old" placeholder="Ancien mot de passe" required>
