@@ -15,13 +15,17 @@ session_set_cookie_params([
 session_start();
 
 set_exception_handler(function (Throwable $e) {
-    error_log($e);
+    error_log(get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     http_response_code(500);
     if (str_contains($_SERVER['SCRIPT_NAME'] ?? '', 'api.php')) {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['ok' => false, 'message' => 'Erreur serveur.']);
+    } elseif ($e instanceof PDOException) {
+        // Cause la plus fréquente : identifiants MySQL de config.php, ou tables non créées (install.php)
+        echo 'Erreur de base de données. Vérifie les identifiants MySQL dans config.php '
+           . '(DB_HOST, DB_NAME, DB_USER, DB_PASS) et que install.php a bien été exécuté.';
     } else {
-        echo 'Erreur serveur. Vérifie config.php et que install.php a bien été exécuté.';
+        echo 'Erreur serveur. Vérifie config.php et le journal d\'erreurs PHP.';
     }
     exit;
 });
