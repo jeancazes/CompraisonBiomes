@@ -119,6 +119,59 @@ function clean_name(string $s): string
     $s = preg_replace('/\s+/u', ' ', $s) ?? '';
     return trim($s);
 }
+/**
+ * Extrait « NOM Prénom » d'un texte collé : liste simple (1 nom par ligne) ou CSV/tableur
+ * (séparateur ; , ou tabulation) avec colonnes Nom / Prénom repérées par l'en-tête.
+ * Les autres colonnes (classe, date, n°…) sont ignorées. @return string[]
+ */
+function parse_student_list(string $text): array
+{
+    $text = preg_replace('/^\xEF\xBB\xBF/', '', $text) ?? $text;
+    $lines = array_values(array_filter(array_map('trim', preg_split('/\R/u', $text) ?: []), fn($l) => $l !== ''));
+    if (!$lines) return [];
+    $sep = null; $best = 0;
+    foreach ([';', "\t", ','] as $c) {
+        $n = substr_count(implode("\n", array_slice($lines, 0, 5)), $c);
+        if ($n > $best) { $best = $n; $sep = $c; }
+    }
+    $isWord = fn(string $v) => (bool)preg_match('/^[\p{L}][\p{L}\s\'’.\-]*$/u', $v);
+    $fmt = function (string $nom, string $pre): string {
+        $nom = mb_strtoupper(clean_name($nom), 'UTF-8');
+        $pre = clean_name($pre);
+        return clean_name($nom . ' ' . mb_strtoupper(mb_substr($pre, 0, 1, 'UTF-8'), 'UTF-8') . mb_substr($pre, 1, null, 'UTF-8'));
+    };
+    if ($sep === null) {                                   // liste simple : une ligne = un nom
+        return array_map('clean_name', $lines);
+    }
+    $rows = array_map(fn($l) => array_map('clean_name', str_getcsv($l, $sep, '"', '')), $lines);
+    $norm = fn(string $v) => preg_replace('/[^a-z]/', '', strtolower(@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $v) ?: $v));
+    $iN = $iP = $iF = null; $start = 0;
+    foreach (array_slice($rows, 0, 5, true) as $ri => $r) {   // recherche de l'en-tête
+        foreach ($r as $ci => $cell) {
+            $k = $norm($cell);
+            if (in_array($k, ['nom', 'nomdefamille', 'nomdusage', 'nompatronymique', 'nomeleve'], true)) $iN ??= $ci;
+            elseif (str_starts_with($k, 'prenom')) $iP ??= $ci;
+            elseif (in_array($k, ['eleve', 'nomprenom', 'prenomnom', 'identite', 'etudiant'], true)) $iF ??= $ci;
+        }
+        if ($iN !== null || $iF !== null) { $start = $ri + 1; break; }
+    }
+    $out = [];
+    foreach (array_slice($rows, $start) as $r) {
+        if ($iN !== null && $iP !== null) {
+            $nom = $r[$iN] ?? ''; $pre = $r[$iP] ?? '';
+            if ($nom !== '' && $pre !== '') $out[] = $fmt($nom, $pre);
+        } elseif ($iN !== null || $iF !== null) {          // une seule colonne d'identité
+            $v = $r[$iN ?? $iF] ?? '';
+            if ($v !== '') $out[] = $iN !== null ? clean_name($v) : $v;
+        } else {                                           // pas d'en-tête : 2 premières colonnes « texte »
+            $w = array_values(array_filter($r, fn($v) => $v !== '' && $isWord($v)));
+            if (count($w) >= 2) $out[] = $fmt($w[0], $w[1]);
+            elseif (count($w) === 1) $out[] = $w[0];
+        }
+    }
+    return $out;
+}
+
 function name_key(string $s): string { return mb_strtolower(clean_name($s), 'UTF-8'); }
 
 function slugify(string $s): string
